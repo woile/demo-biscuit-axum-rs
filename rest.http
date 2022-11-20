@@ -1,0 +1,24 @@
+GET /health_check
+Host: 127.0.0.1:3000
+
+###
+
+POST /login
+Host: 127.0.0.1:3000
+Content-Type: application/json
+
+{
+    "username": "santi",
+    "email": "santi@will.com",
+    "password": "pepe"
+}
+
+### register
+
+POST /register
+Content-Type: application/json
+Host: 127.0.0.1:3000
+
+{
+    "email": "santiwilly@gmail.com"
+}

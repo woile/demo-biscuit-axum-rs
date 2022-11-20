@@ -1,0 +1,18 @@
+[package]
+name = "biscuit-auth-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+argon2 = { version = "0.4.1", features = [ "std" ] }
+axum = "0.6.0-rc.5"
+biscuit-auth = "2.2.0"
+secrecy = { version = "0.8.0", features = [ "serde" ] }
+serde = { version = "1.0.147", features = [ "derive" ] }
+thiserror = "1.0.37"
+tokio = { version = "1.21.2", features = [ "full" ] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
+validator = { version = "0.15", features = ["derive"] }
