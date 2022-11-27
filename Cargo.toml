@@ -7,7 +7,8 @@ edition = "2021"
 
 [dependencies]
 argon2 = { version = "0.4.1", features = [ "std" ] }
-axum = "0.6.0-rc.5"
+axum = "0.6.0"
+axum-extra = {version = "0.4.0", features = ["cookie", "cookie-signed"]}
 biscuit-auth = "2.2.0"
 secrecy = { version = "0.8.0", features = [ "serde" ] }
 serde = { version = "1.0.147", features = [ "derive" ] }

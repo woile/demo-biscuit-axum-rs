@@ -1,14 +1,15 @@
 use axum::{
     body::Body,
-    extract::State,
+    extract::{State, FromRef},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router, RouterService,
+    Json, Router,
 };
+use axum_extra::extract::{SignedCookieJar, cookie::Key};
 use biscuit_auth::{Biscuit, KeyPair};
 use models::User;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, ops::Deref};
 use thiserror::Error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 extern crate argon2;
@@ -30,19 +31,39 @@ impl IntoResponse for AppError {
     }
 }
 
-#[derive(Default)]
-struct AppState {
-    root_keypair: KeyPair,
-}
+#[derive(Clone)]
+struct AppState(Arc<InnerState>);
 
 impl AppState {
     fn new() -> Self {
+        Self(Arc::new(InnerState::new()))
+    }
+}
+impl Deref for AppState {
+    type Target = InnerState;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+struct InnerState {
+    root_keypair: KeyPair,
+    key: Key
+}
+
+impl InnerState {
+    fn new() -> Self {
         Self {
             root_keypair: KeyPair::new(),
+            key: Key::generate()
         }
     }
 }
-type SharedState = Arc<AppState>;
+impl FromRef<AppState> for Key {
+    fn from_ref(state: &AppState) -> Self {
+        state.0.key.clone()
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -50,7 +71,7 @@ async fn main() {
     let app = app();
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "biscuit-auth-rs=debug".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "biscuit_auth_rs=debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -65,14 +86,15 @@ async fn main() {
         .unwrap();
 }
 
-fn app() -> RouterService<Body> {
-    let shared_state = SharedState::default();
-    // let shared_state = Arc::new(AppState::new());
+fn app() -> Router<(), Body> {
+    // let shared_state = SharedState::default();
+    // let shared_state = Arc::new(InnerState::new());
+    let shared_state = AppState::new();
     Router::new()
         .route("/health_check", get(health_check))
         .route("/login", post(login))
         .route("/register", post(register))
-        .with_state(Arc::clone(&shared_state))
+        .with_state(shared_state)
 }
 
 async fn health_check() -> impl IntoResponse {
@@ -80,7 +102,8 @@ async fn health_check() -> impl IntoResponse {
 }
 
 async fn login(
-    State(state): State<SharedState>,
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
     Json(user): Json<User>,
 ) -> Result<impl IntoResponse, AppError> {
     let root_keypair = &state.clone().root_keypair;

@@ -10,3 +10,16 @@
 1. `test/is_auth` -> returns 401 when no token present, 403 invalid creds or 200
 1. `test/is_anon` -> returns always 200
 1. `test/anon_and_auth` -> returns user if auth
+
+
+## Login workflow
+
+```mermaid
+sequenceDiagram
+    actor user
+    participant browser
+    user->>+auth: POST /login (user+pass)
+    auth->>-browser: set session cookie
+    browser->>+auth: /hello (with cookie)
+    auth->>-browser: ok
+```
