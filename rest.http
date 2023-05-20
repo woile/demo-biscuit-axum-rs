@@ -1,10 +1,13 @@
+@host = Host: 127.0.0.1:3000
+
+###
 GET /health_check
-Host: 127.0.0.1:3000
+{{ host }}
 
 ###
 
 POST /login
-Host: 127.0.0.1:3000
+{{ host }}
 Content-Type: application/json
 
 {
@@ -13,12 +16,8 @@ Content-Type: application/json
     "password": "pepe"
 }
 
-### register
+###
 
-POST /register
+GET /is_auth
 Content-Type: application/json
-Host: 127.0.0.1:3000
-
-{
-    "email": "santiwilly@gmail.com"
-}
+{{ host }}
