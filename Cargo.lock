@@ -164,25 +164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "biscuit-auth-rs"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "axum",
- "axum-extra",
- "biscuit-auth",
- "hex",
- "rand 0.8.5",
- "secrecy",
- "serde",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "validator",
-]
-
-[[package]]
 name = "biscuit-parser"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -306,6 +287,25 @@ dependencies = [
  "rand_core 0.5.1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "demo-biscuit-axum-rs"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "axum-extra",
+ "biscuit-auth",
+ "hex",
+ "rand 0.8.5",
+ "secrecy",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "validator",
 ]
 
 [[package]]

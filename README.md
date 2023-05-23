@@ -4,14 +4,16 @@
 
 ## Endpoints
 
-1. `.well-known/` -> information
-1. `login` -> authenticate and receive a biscuit token in a cookie
-1. `validate` -> check if token is valid
-1. `register` -> create user
-1. `test/is_auth` -> returns 401 when no token present, 403 invalid creds or 200
-1. `test/is_anon` -> returns always 200
-1. `test/anon_and_auth` -> returns user if auth
+1. `/login` -> authenticate and receive a biscuit token in a cookie
+1. `/register` -> create user
+1. `/is_auth` -> returns 401 when no token present, 403 invalid creds or 200
 
+## Usage
+
+1. Clone this repo
+1. Run `cargo run`
+1. Go to [rest.http](./rest.http) (In VSCode you'll the [Rest Client Extension](https://marketplace.visualstudio.com/items?itemName=humao.rest-client))
+1. Use the queries
 
 ## Login workflow
 
@@ -25,8 +27,10 @@ sequenceDiagram
     auth->>-browser: ok
 ```
 
-## Notes on biscuit
 
-1. never build datalog snippets by concatenating strings, prefer macros with parameters: biscuit!(r#"user({username})"#, username = self.username).
-Using strings directly is susceptible to injections exactly like in SQL
-2. before querying the username, you still need to authorize the request (with allow if user($u)
+## TODO:
+
+- [ ] Improve error messages
+- [ ] Add `.well-known/` endpoint with pub key
+- [ ] Add `is_admin` endpoint, use RBAC example for this
+- [ ] Add `is_anon` endpoint
