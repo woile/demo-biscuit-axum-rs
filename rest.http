@@ -12,10 +12,19 @@ Content-Type: application/json
 
 {
     "username": "santi",
-    "email": "santi@will.com",
-    "password": "pepe"
+    "password": "pepe223"
 }
 
+###
+
+POST /register
+{{ host }}
+Content-Type: application/json
+
+{
+    "username": "santi",
+    "password": "pepe22"
+}
 ###
 
 GET /is_auth

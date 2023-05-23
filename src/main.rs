@@ -10,20 +10,28 @@ use axum_extra::extract::{
     cookie::{Cookie, Key},
     SignedCookieJar,
 };
-use biscuit_auth::{macros::{biscuit, biscuit_merge}, Biscuit, KeyPair};
-use models::User;
-use std::{net::SocketAddr, ops::Deref, sync::Arc};
+use biscuit_auth::{macros::biscuit, Biscuit, KeyPair};
+use models::{Existing, User};
+use schemas::UserLogin;
+use std::{collections::HashMap, net::SocketAddr, ops::Deref, sync::Arc};
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::models::AuthError;
+
 extern crate argon2;
 
 #[derive(Debug, Error)]
 enum AppError {
-    #[error("Page `{0} not found")]
-    NotFound(String),
+    #[error("Authentication error: {source}")]
+    AuthError {
+        #[from]
+        source: models::AuthError,
+    },
 
-    #[error("Error")]
-    AuthError(#[from] biscuit_auth::error::Token),
+    #[error("Internal Error")]
+    InternalError(#[from] biscuit_auth::error::Token),
 
     #[error("Unauthorized")]
     Unauthorized,
@@ -31,13 +39,18 @@ enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        tracing::error!("{:?}", self);
         let body = self.to_string();
-
-        (StatusCode::FORBIDDEN, body).into_response()
+        let message = match self {
+            AppError::AuthError { source } => (StatusCode::FORBIDDEN, Json(source.to_string())),
+            AppError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(body)),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, Json(body)),
+        };
+        message.into_response()
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, FromRef)]
 struct AppState(Arc<InnerState>);
 
 impl AppState {
@@ -52,9 +65,17 @@ impl Deref for AppState {
         &*self.0
     }
 }
+
+// Implemented as an in-memory hashmap protected with a RwLock
+// but you should take care of persisting using
+// something like `sqlx`.
+// TODO: Should we use tokio::RwLock or std::RwLock?
+type Database = RwLock<HashMap<String, User<Existing>>>;
+
 struct InnerState {
     root_keypair: KeyPair,
     key: Key,
+    database: Database,
 }
 
 impl InnerState {
@@ -62,6 +83,7 @@ impl InnerState {
         Self {
             root_keypair: KeyPair::new(),
             key: Key::generate(),
+            database: Database::default(),
         }
     }
 }
@@ -119,40 +141,60 @@ async fn health_check() -> impl IntoResponse {
 async fn login(
     State(state): State<AppState>,
     jar: SignedCookieJar,
-    Json(user): Json<User>,
+    Json(user): Json<UserLogin>,
 ) -> Result<impl IntoResponse, AppError> {
-    let root_keypair = &state.clone().root_keypair;
+    let username = &user.username;
+    let state = &state.clone();
+    let ackquired_db = state.database.read().await;
+    let db_user = ackquired_db
+        .get(username)
+        .ok_or(AuthError::InvalidCredentials)?;
+
+    db_user.validate_password(user.password)?;
+
+    let user_id = db_user.get_id();
+    let root_keypair = &state.root_keypair;
     // Here you'd validate the credentials
     // and you'd retrievehave a store that reads the user
-    let user_id = user.get_id();
 
     let authority = biscuit!(
         r#"
         // parameters can directly reference in-scope variables
         user({user_id});
         operation("write");
-        // parameters can be manually supplied as well
-        // right({user_id}, "file1", {operation});
-        // right({user_id}, "file1", {operation});
+        operation("read");
+
         check if operation("write");
-        "#
-        // operation = "read",
+        check if operation("read");
+        "# // operation = "read",
     );
 
     let token = authority.build(&root_keypair)?;
     let session_id = token.to_base64()?;
-    println!("token: {}", session_id);
 
-    // Ok((StatusCode::OK).into_response())
+    // WARN: This is just for demonstration purposes, but it should not be logged
+    tracing::debug!("token: {}", session_id);
+
     Ok((
         jar.add(Cookie::new("session_id", session_id)),
         Redirect::to("/health_check"),
     ))
 }
 
-async fn register(Json(new_user): Json<schemas::NewUser>) -> Result<impl IntoResponse, AppError> {
-    println!("{new_user:?}");
-    Ok((StatusCode::OK, "registered!").into_response())
+async fn register(
+    State(state): State<AppState>,
+    Json(new_user): Json<schemas::UserCreate>,
+) -> Result<impl IntoResponse, AppError> {
+    let user: User = new_user.try_into()?;
+    let username = user.username.clone();
+    tracing::debug!("converted to user {user:?}");
+    let created_user = user.as_db_user();
+    state
+        .database
+        .write()
+        .await
+        .insert(username, created_user.clone());
+    Ok((StatusCode::OK, Json(created_user)).into_response())
 }
 
 async fn is_authenticated(
@@ -161,7 +203,6 @@ async fn is_authenticated(
 ) -> Result<impl IntoResponse, AppError> {
     let session = jar.get("session_id");
     if let Some(session_id) = session {
-        println!("{session_id:?}");
         let token = session_id.value().to_owned();
         let root_keypair = &state.clone().root_keypair;
         let biscuit = Biscuit::from_base64(token.clone(), root_keypair.public())?;
@@ -169,7 +210,7 @@ async fn is_authenticated(
         let res: Vec<(String,)> = authorizer
             .query("data($username) <- user($username)")
             .unwrap();
-        println!("{res:?}");
+
         if let Some((username,)) = res.first() {
             return Ok((StatusCode::OK, username.clone()).into_response());
         }
@@ -182,35 +223,87 @@ mod schemas {
     use validator::Validate;
 
     #[derive(Deserialize, Validate, Debug)]
-    pub struct NewUser {
-        #[validate(email)]
-        pub email: String,
+    pub struct UserCreate {
+        #[validate(length(min = 2))]
+        pub username: String,
+
+        #[validate(length(min = 8))]
+        pub password: String,
     }
+
+    // Probably your UserCreate would be different, but as it
+    // is now, we reuse it.
+    pub type UserLogin = UserCreate;
 }
-mod session {}
+
 mod models {
 
-    use argon2::{Argon2, PasswordHash, PasswordVerifier};
+    use std::marker::PhantomData;
+
+    use argon2::{
+        password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    };
     use secrecy::{ExposeSecret, Secret};
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
+
+    use crate::schemas::UserCreate;
     extern crate argon2;
 
-    #[derive(Debug, Deserialize)]
-    pub struct User {
+    #[derive(Debug, Clone)]
+    pub struct Existing;
+
+    #[derive(Debug)]
+    pub struct New;
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct User<State = New> {
         pub username: String,
+
+        #[serde(skip_serializing)]
         pub password: Secret<String>,
+
+        #[serde(skip_serializing)]
+        state: PhantomData<State>,
     }
 
-    impl User {
-        pub fn new(username: String, password: String) -> Self {
-            Self {
-                username,
-                password: Secret::new(password),
+    impl User<New> {
+        pub fn as_db_user(self) -> User<Existing> {
+            User {
+                username: self.username,
+                password: self.password,
+                state: PhantomData,
             }
         }
-
+    }
+    impl User<Existing> {
         pub fn get_id(&self) -> &str {
             &self.username
+        }
+
+        // Validate the password against an instance retrieved from the db
+        // this method can be improved to only appear for db users using a
+        // PanthomState: `User<State = Existing|New>`
+        pub fn validate_password(&self, password_candidate: String) -> Result<(), AuthError> {
+            let password_candidate = Secret::new(password_candidate);
+
+            // TODO: Run inside a `spawn_blocking`
+            verify_password_hash(&self.password, password_candidate)
+        }
+    }
+
+    impl TryFrom<UserCreate> for User<New> {
+        type Error = AuthError;
+
+        fn try_from(value: UserCreate) -> Result<Self, Self::Error> {
+            let password = Secret::new(value.password);
+            tracing::debug!("pass: {:?}", password);
+            let password = compute_password_hash(password)?;
+
+            Ok(Self {
+                username: value.username,
+                password: password,
+                state: PhantomData,
+            })
         }
     }
 
@@ -223,14 +316,20 @@ mod models {
         UnexpectedError(#[from] argon2::password_hash::Error),
     }
 
-    // fn validate_credentials(keypair: KeyPair) -> Result<User, Error> {
+    pub fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>, AuthError> {
+        let salt = SaltString::generate(&mut rand::thread_rng());
+        let password_hash = Argon2::new(
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            argon2::Params::new(15000, 2, 1, None).expect("Invalid params, should not fail"),
+        )
+        .hash_password(password.expose_secret().as_bytes(), &salt)?
+        .to_string();
+        Ok(Secret::new(password_hash))
+    }
 
-    //     todo!("not implemented")
-
-    // }
-
-    fn verify_password_hash(
-        expected_password_hash: Secret<String>,
+    pub fn verify_password_hash(
+        expected_password_hash: &Secret<String>,
         password_candidate: Secret<String>,
     ) -> Result<(), AuthError> {
         let expected_password_hash = PasswordHash::new(expected_password_hash.expose_secret())?;
@@ -240,6 +339,6 @@ mod models {
                 password_candidate.expose_secret().as_bytes(),
                 &expected_password_hash,
             )
-            .map_err(|e| AuthError::InvalidCredentials)
+            .map_err(|_e| AuthError::InvalidCredentials)
     }
 }
