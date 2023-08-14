@@ -34,3 +34,4 @@ sequenceDiagram
 - [ ] Add `.well-known/` endpoint with pub key
 - [ ] Add `is_admin` endpoint, use RBAC example for this
 - [ ] Add `is_anon` endpoint
+- [ ] Use query! macro now

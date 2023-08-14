@@ -6,7 +6,7 @@ GET /health_check
 
 ###
 
-POST /login
+POST /register
 {{ host }}
 Content-Type: application/json
 
@@ -17,7 +17,7 @@ Content-Type: application/json
 
 ###
 
-POST /register
+POST /login
 {{ host }}
 Content-Type: application/json
 
@@ -25,6 +25,7 @@ Content-Type: application/json
     "username": "santi",
     "password": "pepe2222"
 }
+
 ###
 
 GET /is_auth

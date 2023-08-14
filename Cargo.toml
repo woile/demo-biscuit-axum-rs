@@ -7,9 +7,9 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-argon2 = { version = "0.4.1", features = [ "std" ] }
+argon2 = { version = "0.5.1", features = [ "std" ] }
 axum = { version = "0.6.18", features = ["macros"]}
-axum-extra = {version = "0.4.0", features = ["cookie", "cookie-signed"]}
+axum-extra = {version = "0.7.4", features = ["cookie", "cookie-signed"]}
 biscuit-auth = "3.1"
 hex = "0.4.3"
 rand = { version = "0.8", features=["std_rng"] }
@@ -19,4 +19,4 @@ thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = [ "full" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
-validator = { version = "0.15", features = ["derive"] }
+validator = { version = "0.16", features = ["derive"] }

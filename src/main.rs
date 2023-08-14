@@ -10,10 +10,14 @@ use axum_extra::extract::{
     cookie::{Cookie, Key},
     SignedCookieJar,
 };
-use biscuit_auth::{macros::biscuit, Biscuit, KeyPair};
+use biscuit_auth::{
+    macros::{authorizer, biscuit},
+    Biscuit, KeyPair,
+};
+
 use demo_biscuit_axum_rs::models::{AuthError, Existing, User};
 use demo_biscuit_axum_rs::schemas::{UserCreate, UserLogin};
-use std::{collections::HashMap, net::SocketAddr, ops::Deref, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, ops::Deref, sync::Arc, time::{SystemTime, Duration}};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -35,12 +39,13 @@ enum AppError {
         source: validator::ValidationErrors,
     },
 
-    #[error("Internal Error")]
-    InternalError(#[from] biscuit_auth::error::Token),
+    #[error("Unauthorized")]
+    TokenError(#[from] biscuit_auth::error::Token),
 
     #[error("Unauthorized")]
     Unauthorized,
 }
+
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
@@ -48,9 +53,22 @@ impl IntoResponse for AppError {
         let body = self.to_string();
         let message = match self {
             AppError::AuthError { source } => (StatusCode::FORBIDDEN, Json(source.to_string())),
-            AppError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(body)),
+            AppError::TokenError(err) => match err.to_owned() {
+                biscuit_auth::error::Token::FailedLogic(_) => {
+                    (StatusCode::UNAUTHORIZED, Json(body))
+                }
+                biscuit_auth::error::Token::Format(_) => {
+                    (StatusCode::FORBIDDEN, Json(String::from("Forbidden")))
+                }
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(String::from("Server Error")),
+                ),
+            },
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, Json(body)),
-            AppError::ValidationError { source } => (StatusCode::BAD_REQUEST, Json(source.to_string())),
+            AppError::ValidationError { source } => {
+                (StatusCode::BAD_REQUEST, Json(source.to_string()))
+            }
         };
         message.into_response()
     }
@@ -125,19 +143,17 @@ async fn login(
 
     let user_id = db_user.get_id();
     let root_keypair = &state.root_keypair;
-    // Here you'd validate the credentials
-    // and you'd retrievehave a store that reads the user
 
+    // facts carried by the token
     let authority = biscuit!(
         r#"
-        // parameters can directly reference in-scope variables
         user({user_id});
-        operation("write");
-        operation("read");
+        right("write");
+        right("read");
 
-        check if operation("write");
-        check if operation("read");
-        "# // operation = "read",
+        check if time($time), $time <= {expiration};
+        "#,
+        expiration = SystemTime::now() + Duration::from_secs(60),
     );
 
     let token = authority.build(&root_keypair)?;
@@ -161,7 +177,6 @@ async fn register(
     new_user.validate()?;
     let user: User = new_user.try_into()?;
     let username = user.username.clone();
-    tracing::debug!("converted to user {user:?}");
     let created_user = user.as_db_user();
     state
         .database
@@ -179,8 +194,22 @@ async fn is_authenticated(
     if let Some(session_id) = session {
         let token = session_id.value().to_owned();
         let root_keypair = &state.clone().root_keypair;
-        let biscuit = Biscuit::from_base64(token.clone(), root_keypair.public())?;
-        let mut authorizer = biscuit.authorizer()?;
+        let token = Biscuit::from_base64(token, root_keypair.public())?;
+        let mut authorizer = authorizer!(
+            r#"
+            resource("is_authenticated");
+            operation("read");
+
+            allow if user($username), right("read"), right("write"), operation($o);
+            "#
+        );
+        authorizer.set_time();
+        authorizer.add_token(&token)?;
+        tracing::debug!("{}", authorizer.dump_code());
+        authorizer.authorize()?;
+
+        // Extract the user for further usage.
+        // It could be fetched from db, or use the id to retrive an item, etc.
         let res: Vec<(String,)> = authorizer
             .query("data($username) <- user($username)")
             .unwrap();
