@@ -4,6 +4,8 @@
 
 ## Endpoints
 
+See [rest.http](./rest.http)
+
 1. `/login` -> authenticate and receive a biscuit token in a cookie
 1. `/register` -> create user
 1. `/is_auth` -> returns 401 when no token present, 403 invalid creds or 200
@@ -23,15 +25,12 @@ sequenceDiagram
     participant browser
     user->>+auth: POST /login (user+pass)
     auth->>-browser: set session cookie
-    browser->>+auth: /hello (with cookie)
+    browser->>+auth: /is_auth (with cookie)
     auth->>-browser: ok
 ```
 
 
-## TODO:
+## TODO
 
-- [ ] Improve error messages
 - [ ] Add `.well-known/` endpoint with pub key
 - [ ] Add `is_admin` endpoint, use RBAC example for this
-- [ ] Add `is_anon` endpoint
-- [ ] Use query! macro now
